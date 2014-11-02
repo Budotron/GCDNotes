@@ -1,0 +1,392 @@
+---
+title: 'CGD: Downloading Files'
+output: html_document
+date: "September 24, 2014"
+---
+## Downloading the files
+First steps
+
+* know what directory you are in 
+* use getwd() and setwd(), as necessary
+* setwd("../") moves up one directory
+
+1. Create a directory for the data to fall into, if such a directory doesn't already exist
+
+if (!file.exists("directory name")){  
+        dir.create("directory name")  
+}
+
+2. Get the data. download.file() is the main way that we obtain internet data
+. *Always* include the time of download
+
+download.file(url = , destfile = "./directory name/filename.ext", method = "curl")  
+dateDownloaded<-date()
+
+The downloaded files can be viewed with list.files("./directory name")
+
+3. The file is now stored locally. The most commonly used function to read it into R is read.table(). It is the most robust, and allows the most flexibility.   
+However, because of its slowness, it is not the best method to read large tables into R. 
+
+eg: downloading data on [Baltimore Fixed Speed Camera](https://data.baltimorecity.gov/Transportation/Baltimore-Fixed-Speed-Cameras/dz54-2aru) data and reading into R
+```{r}
+# Having checked that we are in the correct working directory
+
+# The following function downloads the .csv file containing data for Balitmore's Fixed Speed Cameras
+
+#Input: Link to the file, desired directory name, desired, file name, and file extension
+#Output: The path to the required file
+
+createAndDownload<-function(fileUrl, dir, filename, ext){
+        # Step 1: create directory, if it is not already present
+        dirName<-paste(dir, sep = "")
+        if(!file.exists(dirName)){
+                dir.create(path = dirName)
+        }
+        # Step 2: Get the data, unless this step has already been done
+        dest<-paste("./", dirName,"/", filename, ext, sep = "")
+        if(!file.exists(dest)){
+                download.file(url = fileUrl, destfile = dest, method = "curl") 
+                datedownloaded<-date()
+        }
+        dest
+}
+fileUrl<-"https://data.baltimorecity.gov/api/views/dz54-2aru/rows.csv?accessType=DOWNLOAD"
+dest<-createAndDownload(fileUrl, dir="camera", filename="camera", ext = ".csv")
+# Step 3: load the data
+# because the variable names are included at the top of each file, header = T
+camdat<-read.table(file = dest, header = T, sep = ",")
+```
+In the case that we are working with a .csv file, as here, read.csv() can be used. It sets sep =", " and header =T by default
+```{r}
+camdat2<-read.csv("./camera/camera.csv")
+all.equal(camdat, camdat2)
+rm(camdat2)
+```
+_*Troubleshooting*_ 
+
+* set quote ="" to tell R to ignore quoted values
+* na.strings = sets the character that represents the missing values
+
+## Reading in particular file formats
+
+### Excel 
+
+1. require the xlsx package
+2. run createAndDownload() with the appropriate parameters
+3. in step 3, use read.xlsx() instead of read.table() specifying which sheet the data is stored on with sheetIndex, and specify the header, if necessary
+
+```{r}
+fileUrl<-"https://data.baltimorecity.gov/api/views/dz54-2aru/rows.xlsx?accessType=DOWNLOAD"
+dest<-createAndDownload(fileUrl = fileUrl, dir = "camera", filename = "camera", ext = ".xlsx") 
+require("xlsx")
+camdat2<-read.xlsx(file = dest, sheetIndex = 1, header = T)
+```
+Nice things
+
+* you can read specific rows and columns
+```{r}
+colInd<-2:3; rowInd<-1:4
+camdat2subset<-read.xlsx(file = dest, sheetIndex = 1, rowIndex = rowInd, colIndex = colInd, header = T)
+camdat2subset
+```
+* you can write an .xlsx file out with 
+```{r}
+write.xlsx(camdat2subset, file = "./camera/camera2.xlsx")
+```
+
+### XML
+
+* short for "extensible markup language"
+* frequently used to store structured data
+* widely used in internet applications
+* extracting XML is the basis for most web scraping
+* "XML" package does not support http**s** (secure http). Delete "s" of https manually or by using sub(https, http, fileURL)
+
+**Tags** correspond to general labels
+
+* start tags < section >
+* end tags < \section >
+
+**Elements** are specific examples of tags
+
+eg: < Greeting > Hello <\\ greeting >
+
+Unlike the previous examples, we do **not** use download file. Instead use xmlTreeParse to parse out the XML file given in the URL
+```{r}
+require(XML)
+fileUrl<-"http://www.w3schools.com/xml/simple.xml"
+doc<-xmlTreeParse(file = fileUrl, useInternalNodes = T)
+doc
+```
+doc is parsed into nodes. The topmost node wraps the entire document. In this case it's < breakfast_menu>
+```{r}
+top<-xmlRoot(doc)
+xmlName(top)
+```
+The elements in between the root node is given by names. Each item is wrapped within a "food" element
+```{r}
+#child nodes of this root
+names(top)
+```
+Accessing elements in an XML file is totally analogous to accessing elements of a list. 
+```{r}
+#first element of the rootnode
+top[[1]]
+names(top[[1]])
+#Suppose we want to extract the price of the first element
+top[[1]][["price"]]
+# Extract the price  variable of all elements
+xpathSApply(doc = top, "//price", xmlValue)
+# similarly
+xpathSApply(doc=top, "//name", xmlValue)
+```
+
+### HTML
+
+Right click [here](view-source:http://espn.go.com/nfl/team/_/name/bal/baltimore-ravens), and view the source. We want to drill into this source code and extract some information
+
+Load the data with **html**TreeParse. Remember to delete "view source" from the head of the url
+```{r}
+fileUrl<-"http://espn.go.com/nfl/team/_/name/bal/baltimore-ravens"
+doc<-htmlTreeParse(file = fileUrl, useInternalNodes = T)
+str(doc)
+```
+Look for "list items" (li) with a particular class (in the example below, equal to score)
+```{r}
+xpathSApply(doc, "//li[@class ='score']", xmlValue)
+xpathSApply(doc, "//li[@class ='team-name']", xmlValue)
+```
+### JSON
+JSON files are similar to XML files insofar as they are structured, and is very commonly used in Application Programming Interfaces. APIs are how you can access the data for companies like Twitter or facebook through URLs.   
+Click [here](https://api.github.com/users/jtleek/repos) to obtain the API for the github API containing data about the repos that the instructor's contributing to.   
+Reading data from a JSON file is similar to reading from an XML file
+```{r}
+require(jsonlite)
+fileUrl<-"https://api.github.com/users/jtleek/repos"
+jsonData<-fromJSON(fileUrl)
+names(jsonData)
+```
+jsonData is a *data frame* of *data frames*. 
+```{r}
+class(jsonData)
+# recall how to subset a data frame
+c(head(jsonData[1]), head(jsonData["id"]))
+jsonData$id
+# jsonData$owner is another dataframe
+names(jsonData$owner)
+#so we can drill further down, eg
+jsonData$owner$login
+```
+If we have to export to an API that requires API formatted data, use toJSON. To view the file use the **C**oncatenate **A**nd Prin**t** command, cat()
+```{r}
+myJson<-toJSON(iris, pretty = T)
+# head(cat(myJson))
+```
+
+### Quiz
+Question 1
+The American Community Survey distributes downloadable data about United States communities. Download the 2006 microdata survey about housing for the state of Idaho using download.file() from here: 
+https://d396qusza40orc.cloudfront.net/getdata%2Fdata%2Fss06hid.csv 
+and load the data into R. The code book, describing the variable names is here: 
+https://d396qusza40orc.cloudfront.net/getdata%2Fdata%2FPUMSDataDict06.pdf 
+How many properties are worth $1,000,000 or more?
+
+Solution outline    
+1. run createAndDownload()  
+2. read the data into R using read.csv()  
+According to the code book, the variable "VAL" contains the property values, and those properties valued in excess of $1M are listed as 24.   
+3. locate and count up the number of entries under VAL that are 24
+
+
+```{r}
+fileUrl<-"https://d396qusza40orc.cloudfront.net/getdata%2Fdata%2Fss06hid.csv"
+dest<-createAndDownload(fileUrl = fileUrl, dir = "microdatasurvey", filename =  "housingMicrodata", ext = ".csv")
+data<-read.csv(dest)
+milPlus<-length(which(data$VAL %in% 24))
+paste("There are", milPlus, "properties worth in excess of 1M", sep = " ")
+```
+
+Question 2
+Use the data you loaded from Question 1. Consider the variable FES in the code book. Which of the "tidy data" principles does this variable violate?
+
+The principles of tidy data are 
+
+1. Each variable should be in its own column
+2. Each observation should be in its own row
+3. There should be one table for every kind of variable (eg: all twitter data is in one table, tall fb data is in another)
+4. If there are multiple tables, they should include a coulmn in the table that allow them to be linked
+
+FES 1   
+ Family type and employment status        
+ b .N/A (GQ/vacant/not a family)  
+ 1 .Married-couple family: Husband and wife in LF  
+ 2 .Married-couple family: Husband in labor force, wife
+ .not in LF  
+ 3 .Married-couple family: Husband not in LF,
+ .wife in LF  
+ 4 .Married-couple family: Neither husband nor wife in
+ .LF  
+ 5 .Other family: Male householder, no wife present, in
+ .LF  
+ 6 .Other family: Male householder, no wife present, 
+ .not in LF  
+ 7 .Other family: Female householder, no husband
+ .present, in LF  
+ 8 .Other family: Female householder, no husband 
+ .present, not in LF   
+ 
+ Here, several variables are grouped together: 
+ 
+ 1. Married couple or Other family
+ 2. Male or Female Householder
+ 3. Spouse present or Not
+ 4. In Labour Force, or Not In Labour Force
+ 5. Spouse in Labour Force or Spouse Not In Labour Force
+ 
+ According to the Principles of Tidy Data, each of these vaibales should be listed in its own column
+ 
+Question 3  
+Download the Excel spreadsheet on Natural Gas Aquisition Program here: 
+https://d396qusza40orc.cloudfront.net/getdata%2Fdata%2FDATA.gov_NGAP.xlsx 
+Read rows 18-23 and columns 7-15 into R and assign the result to a variable called dat.
+What is the value of:
+ sum(dat$Zip*dat$Ext,na.rm=T) 
+(original data source: http://catalog.data.gov/dataset/natural-gas-acquisition-program)
+
+Solution outline:  
+1. run createAndDownload()  
+2. assign rowInd:=18-23 and colInd:=7-15  
+3. read in those specific rows and colums using read.xlsx()  
+4. evaluate the given expression
+
+```{r}
+fileUrl<-"https://d396qusza40orc.cloudfront.net/getdata%2Fdata%2FDATA.gov_NGAP.xlsx"
+dest<-createAndDownload(fileUrl = fileUrl, dir = "NGA", filename = "NGAdata", ext = ".xlsx") 
+rowInds<-18:23
+colInds<-7:15
+dat<-read.xlsx(file = dest, sheetIndex = 1, rowIndex = rowInds, colIndex = colInds, header = T)
+sum(dat$Zip*dat$Ext,na.rm=T) 
+```
+
+Question 4  
+Read the XML data on Baltimore restaurants from here: 
+https://d396qusza40orc.cloudfront.net/getdata%2Fdata%2Frestaurants.xml 
+How many restaurants have zipcode 21231?
+
+Solution Outline  
+1. Use xmlTreeParse to parse and read in the data  
+2. use xpathSApply() to abtain all zip codes  
+3. use which() to locate all zipcodes equal to 21231  
+4. use length to get the number of restaurants with the required zip code  
+
+```{r}
+fileURL<-"https://d396qusza40orc.cloudfront.net/getdata%2Fdata%2Frestaurants.xml"
+fileUrl<-sub(pattern = "s", replacement = "", x = fileURL)
+doc<-xmlTreeParse(file = fileUrl, useInternalNodes = T)
+zips<-xpathSApply(doc = doc, path = "//zipcode", fun = xmlValue)
+keep<-which(zips %in% 21231)
+length(keep)
+```
+
+Question 5  
+The American Community Survey distributes downloadable data about United States communities. Download the 2006 microdata survey about housing for the state of Idaho using download.file() from here: 
+https://d396qusza40orc.cloudfront.net/getdata%2Fdata%2Fss06pid.csv 
+using the fread() command load the data into an R object called DT.   
+
+Which of the following is the fastest way to calculate the average value of the variable  
+pwgtp15   
+broken down by sex using the data.table package?
+
+1. rowMeans(DT)[DT$SEX==1]; rowMeans(DT)[DT$SEX==2]        		
+2. mean(DT$pwgtp15,by=DT$SEX)			
+3. DT[,mean(pwgtp15),by=SEX]			
+4. tapply(DT$pwgtp15,DT$SEX,mean)			
+5. mean(DT[DT$SEX==1,]$pwgtp15); mean(DT[DT$SEX==2,]$pwgtp15)			
+6. sapply(split(DT$pwgtp15,DT$SEX),mean)
+
+Firstly, fread(), ([Fast and friendly file finagler](http://www.inside-r.org/packages/cran/data.table/docs/fread)) is more-or-less just a faster version of read.table()
+
+### Aside: the data.table package
+
+* data.table inherits from data.frame, so all functions that accept data.frame will also accept data.table
+* much faster at subsetting, grouping and updting variables
+
+Data tables are created in exactly the same way as data frames
+```{r}
+library(data.table)
+set.seed(1)
+df<-data.frame(x=1:9, y=rep(c("a","b", "c"), 3), z=rnorm(9))
+df
+class(df)
+dt<-data.table(x=1:9, y=rep(c("a","b", "c"), 3), z=rnorm(9))
+dt
+class(dt)
+```
+To see all the data.tables in memory
+```{r}
+tables()
+```
+Row subsetting is as usual
+```{r}
+dt[1,]
+dt[dt$y=="a"]
+```
+Column subsetting is way different. Within the [], everything after the comma is an expression, which is used to summarize the data in different ways. 
+```{r}
+dt[, list(mean(x), sum(z))]
+#add a column w that is the sum of z and x
+dt[, w:=z+x]
+# expressions can be multistep (for this you enclose in {}, and seperate steps with ;)
+dt[, m:={temp<-(x-2+z); log2(temp+5)}]
+dt[, a:=z>0]
+dt[, b:=mean(x+w), by=a]
+```
+A unique aspect of data tables is that they have keys, so if you set the key, you'll be able to subset and sort a data table much more rapidly than you would be able to do with a data frame
+```{r}
+tables()
+setkey(x = dt, y)
+tables()
+dt['c']
+```
+There are more to data tables, but those notes belong in merging data
+
+Solution Outline
+1. Eliminate commands which do not return the average value of pwgtp15 
+2. use system.time()[[1]] to capture the user time, and determine which is the fastest
+
+```{r}
+fileURL<-"https://d396qusza40orc.cloudfront.net/getdata%2Fdata%2Fss06pid.csv"
+dest<-createAndDownload(fileUrl = fileURL, dir = "microdatasurvey", filename = "housingMicrodata2", ext = ".csv")
+DT<-fread(input = dest, sep =",")
+```
+run the commands one by one in console to determine which produce the desired result. This eliminates choices 1 and 2
+```{r}
+system.time(DT[,mean(pwgtp15),by=SEX])[[1]]
+system.time(tapply(DT$pwgtp15,DT$SEX,mean))[[1]]
+system.time({mean(DT[DT$SEX==1,]$pwgtp15); mean(DT[DT$SEX==2,]$pwgtp15)})[[1]]
+system.time(sapply(split(DT$pwgtp15,DT$SEX),mean))[[1]]
+```
+Because of the ties, it is difficult to declare a clear winner, so it makes sense to repeat the experiment 100 times, and take the cumulative average
+```{r}
+trials<-matrix(nrow = 4, ncol=100, 
+               dimnames = list(c("method1","method2","method3","method4")))
+count<-0
+# try to redo this using ~apply
+for (i in (1:100)){
+        time1<-system.time(DT[,mean(pwgtp15),by=SEX])
+        trials[1, i]<-(time1[[1]])
+        time2<-system.time(tapply(DT$pwgtp15,DT$SEX,mean))
+        trials[2, i]<-time2[[1]]
+        time3<-system.time({mean(DT[DT$SEX==1,]$pwgtp15); mean(DT[DT$SEX==2,]$pwgtp15)})
+        trials[3, i]<- time3[[1]]
+        time4<-system.time(sapply(split(DT$pwgtp15,DT$SEX),mean))
+        trials[4, i]<-time4[[1]]
+}
+method1av_time<-cumsum(trials[1, ])/seq_along(trials[1,])
+method2av_time<-cumsum(trials[2, ])/seq_along(trials[2,])
+method3av_time<-cumsum(trials[3, ])/seq_along(trials[3,])
+method4av_time<-cumsum(trials[4, ])/seq_along(trials[4,])
+times<- c(tail(method1av_time, 1), tail(method2av_time, 1), tail(method3av_time, 1), tail(method4av_time, 1))
+best<-which(times %in% min(times))
+paste("fastest time (user) acheived by method", best, sep = " ")
+```
